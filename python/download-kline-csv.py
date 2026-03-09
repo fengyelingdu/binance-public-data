@@ -54,40 +54,43 @@ def parse_args():
 
 
 def download_and_extract(url, csv_dest_path, tmp_dir, max_retries=3):
-    """下载 zip 并解压 CSV 到目标路径，失败自动重试，成功返回 True。"""
+    """下载 zip 并解压 CSV 到目标路径，失败返回 (False, 原因)，成功返回 (True, None)。"""
     tmp_zip = os.path.join(tmp_dir, "tmp.zip")
+    last_error = None
 
     for attempt in range(1, max_retries + 1):
         try:
             urllib.request.urlretrieve(url, tmp_zip)
+            last_error = None
             break
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as e:
             if os.path.exists(tmp_zip):
                 os.remove(tmp_zip)
-            return False
-        except (urllib.error.ContentTooShortError, urllib.error.URLError, ConnectionError, TimeoutError):
+            return False, f"HTTP {e.code} {e.reason}"
+        except (urllib.error.ContentTooShortError, urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            last_error = str(e)
             if os.path.exists(tmp_zip):
                 os.remove(tmp_zip)
             if attempt < max_retries:
                 time.sleep(2 * attempt)
                 continue
-            return False
+            return False, f"重试{max_retries}次后仍失败: {last_error}"
 
     try:
         with zipfile.ZipFile(tmp_zip, "r") as zf:
             csv_names = [n for n in zf.namelist() if n.endswith(".csv")]
             if not csv_names:
-                return False
+                return False, "zip 内无 CSV 文件"
             zf.extract(csv_names[0], tmp_dir)
             extracted = os.path.join(tmp_dir, csv_names[0])
             shutil.move(extracted, csv_dest_path)
     except zipfile.BadZipFile:
-        return False
+        return False, "zip 文件损坏"
     finally:
         if os.path.exists(tmp_zip):
             os.remove(tmp_zip)
 
-    return True
+    return True, None
 
 
 def main():
